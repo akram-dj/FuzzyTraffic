@@ -1,0 +1,35 @@
+<additional>
+
+    <!-- WEST -->
+    <laneAreaDetector id="e2_0"
+        lane="E0_0"
+        pos="0"
+        length="300"
+        period="1"
+        file="e2_0.xml"/>
+
+    <!-- EAST -->
+    <laneAreaDetector id="e2_1"
+        lane="-E1_0"
+        pos="0"
+        length="300"
+        period="1"
+        file="e2_1.xml"/>
+
+    <!-- SOUTH -->
+    <laneAreaDetector id="e2_2"
+        lane="-E2_0"
+        pos="0"
+        length="300"
+        period="1"
+        file="e2_2.xml"/>
+
+    <!-- NORTH -->
+    <laneAreaDetector id="e2_3"
+        lane="-E3_0"
+        pos="0"
+        length="300"
+        period="1"
+        file="e2_3.xml"/>
+
+</additional>

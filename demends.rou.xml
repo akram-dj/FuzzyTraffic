@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<routes xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" 
+        xsi:noNamespaceSchemaLocation="http://sumo.dlr.de/xsd/routes_file.xsd">
+
+    <!-- Routes -->
+    <route id="r_0" edges="E0 E1 -E9 -E8 -E7" color="blue"/>
+    <route id="r_1" edges="-E2 E3 -E11 -E10 -E1 -E0" color="yellow"/>
+    <route id="r_2" edges="-E4 -E3 E2 E8 E9 -E1 -E0" color="black"/>
+    <route id="r_3" edges="E2 -E7 -E6 -E5 -E4 -E3" color="white"/>
+    <route id="r_4" edges="E6 E7 -E2 -E0 E6 E7 -E2" color="128,0,0"/>
+
+    <!-- ==================== Vehicles Flows (Increased Demand) ==================== -->
+    
+    <!-- f_0: Main flow from West to East (Heavy traffic) -->
+    <flow id="f_0" begin="0.00" number="3600" period="9" color="blue" route="r_0"/>
+
+    <!-- f_1: From South to North-West (Increased) -->
+    <flow id="f_1" begin="0.00" number="800" period="5" color="white" route="r_2"/>
+
+    <!-- f_2: Looping / internal traffic -->
+    <flow id="f_2" begin="0.00" end="7200.00" number="600" color="128,0,128" route="r_3"/>
+
+    <!-- f_3: Heavy flow from East to West -->
+    <flow id="f_3" begin="0.00" number="4000" period="5" color="128,0,128" route="r_1"/>
+
+    <!-- f_4: Heavy North-South looping flow -->
+    <flow id="f_4" begin="0.00" number="3500" period="6" color="128,0,128" route="r_4"/>
+
+</routes>

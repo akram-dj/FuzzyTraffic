@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<sumoConfiguration>
+    <input>
+        <net-file value="net.net.xml"/>
+        <route-files value="demends.rou.xml"/>
+        <additional-files value="netconf.add.xml"/>
+    </input>
+    <time>
+        <begin value="0"/>
+        <end value="10000"/>
+    </time>
+</sumoConfiguration>
