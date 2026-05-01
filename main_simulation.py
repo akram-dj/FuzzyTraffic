@@ -62,13 +62,15 @@ def _accumulate_waiting_seconds(conn: traci.connection.Connection) -> float:
     return float(waiting)
 
 
-def run_parallel_comparison() -> None:
+def run_parallel_comparison(use_gui: bool = True) -> None:
     print("🚦 Starting parallel comparison: fuzzy vs standard controller")
 
     # identical scenario and demand for both instances
     common_args = ["-c", "config.sumocfg", "--start", "true", "--quit-on-end", "true"]
-    traci.start(["sumo", *common_args], label="fuzzy")
-    traci.start(["sumo", *common_args], label="standard")
+    sumo_bin = "sumo-gui" if use_gui else "sumo"
+    traci.start([sumo_bin, *common_args], label="fuzzy")
+    traci.start([sumo_bin, *common_args], label="standard")
+    print(f"Opened two SUMO instances using {sumo_bin}: labels=fuzzy,standard")
 
     conn_fuzzy = traci.getConnection("fuzzy")
     conn_standard = traci.getConnection("standard")
@@ -108,4 +110,4 @@ def run_parallel_comparison() -> None:
 
 
 if __name__ == "__main__":
-    run_parallel_comparison()
+    run_parallel_comparison(use_gui=True)
