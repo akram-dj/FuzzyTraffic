@@ -9,13 +9,7 @@ else:
 import numpy as np
 import traci
 
-from fuzzy_controller import (
-    BASELINE_PARAMS,
-    build_fuzzy_control_system,
-    evaluate_green_time,
-    optimize_membership_with_ga,
-    plot_membership_functions,
-)
+from fuzzy_controller import BASELINE_PARAMS, build_fuzzy_control_system, evaluate_green_time
 
 TLS_ID = "J1"
 PHASE_EW_GREEN = 0
@@ -31,70 +25,87 @@ def _get_opposite_detector_ids(current_phase: int) -> tuple[list[str], str]:
     return ["e2_2", "e2_3"], "NS (North-South)"
 
 
-def _get_metrics(detector_ids: list[str]) -> tuple[float, float, float]:
-    queue = sum(traci.lanearea.getJamLengthVehicle(det_id) for det_id in detector_ids)
-    occupancy = float(np.mean([traci.lanearea.getLastStepOccupancy(det_id) for det_id in detector_ids]))
+def _get_metrics(conn: traci.connection.Connection, detector_ids: list[str]) -> tuple[float, float, float]:
+    queue = sum(conn.lanearea.getJamLengthVehicle(det_id) for det_id in detector_ids)
+    occupancy = float(np.mean([conn.lanearea.getLastStepOccupancy(det_id) for det_id in detector_ids]))
 
     vehicle_ids = set()
     for det_id in detector_ids:
-        vehicle_ids.update(traci.lanearea.getLastStepVehicleIDs(det_id))
-
-    wait_time = max((traci.vehicle.getWaitingTime(veh_id) for veh_id in vehicle_ids), default=0.0)
+        vehicle_ids.update(conn.lanearea.getLastStepVehicleIDs(det_id))
+    wait_time = max((conn.vehicle.getWaitingTime(veh_id) for veh_id in vehicle_ids), default=0.0)
     return float(queue), float(wait_time), occupancy
 
 
-def run(use_ga_optimization: bool = False, use_gui: bool = True) -> None:
-    print("🚦 Starting Intelligent Traffic Light Control Simulation...\n")
-    if use_ga_optimization:
-        print("[Init] Running GA optimization (fast mode)...")
-        params = optimize_membership_with_ga(generations=12, pop_size=16, seed=42, verbose=True)
+def _step_controller(conn: traci.connection.Connection, fuzzy_system, state: dict, fuzzy_enabled: bool) -> None:
+    current_phase = conn.trafficlight.getPhase(TLS_ID)
+    now = conn.simulation.getTime()
+    time_left = conn.trafficlight.getNextSwitch(TLS_ID) - now
+
+    if current_phase != state["last_phase"]:
+        state["decision_made"] = False
+        if current_phase in (PHASE_EW_GREEN, PHASE_NS_GREEN) and fuzzy_enabled:
+            conn.trafficlight.setPhaseDuration(TLS_ID, state["next_green_duration"])
+        state["last_phase"] = current_phase
+
+    if fuzzy_enabled and (not state["decision_made"]) and current_phase in (PHASE_EW_GREEN, PHASE_NS_GREEN) and time_left <= DECISION_HORIZON_SEC:
+        detector_ids, _ = _get_opposite_detector_ids(current_phase)
+        queue, wait_time, occupancy = _get_metrics(conn, detector_ids)
+        state["next_green_duration"] = float(np.clip(evaluate_green_time(fuzzy_system, queue, wait_time, occupancy), MIN_GREEN, MAX_GREEN))
+        state["decision_made"] = True
+
+
+def _accumulate_waiting_seconds(conn: traci.connection.Connection) -> float:
+    waiting = 0
+    for veh_id in conn.vehicle.getIDList():
+        if conn.vehicle.getSpeed(veh_id) < 0.1:
+            waiting += 1
+    return float(waiting)
+
+
+def run_parallel_comparison() -> None:
+    print("🚦 Starting parallel comparison: fuzzy vs standard controller")
+
+    # identical scenario and demand for both instances
+    common_args = ["-c", "config.sumocfg", "--start", "true", "--quit-on-end", "true"]
+    traci.start(["sumo", *common_args], label="fuzzy")
+    traci.start(["sumo", *common_args], label="standard")
+
+    conn_fuzzy = traci.getConnection("fuzzy")
+    conn_standard = traci.getConnection("standard")
+
+    fuzzy_params = BASELINE_PARAMS
+    fuzzy_system = build_fuzzy_control_system(fuzzy_params)
+
+    fuzzy_state = {"next_green_duration": 20.0, "last_phase": -1, "decision_made": False}
+    standard_state = {"next_green_duration": 20.0, "last_phase": -1, "decision_made": False}
+
+    total_wait_fuzzy = 0.0
+    total_wait_standard = 0.0
+
+    while conn_fuzzy.simulation.getMinExpectedNumber() > 0 or conn_standard.simulation.getMinExpectedNumber() > 0:
+        if conn_fuzzy.simulation.getMinExpectedNumber() > 0:
+            conn_fuzzy.simulationStep()
+            _step_controller(conn_fuzzy, fuzzy_system, fuzzy_state, fuzzy_enabled=True)
+            total_wait_fuzzy += _accumulate_waiting_seconds(conn_fuzzy)
+
+        if conn_standard.simulation.getMinExpectedNumber() > 0:
+            conn_standard.simulationStep()
+            _step_controller(conn_standard, None, standard_state, fuzzy_enabled=False)
+            total_wait_standard += _accumulate_waiting_seconds(conn_standard)
+
+    conn_fuzzy.close()
+    conn_standard.close()
+
+    print("\n=== Comparison Result ===")
+    print(f"Fuzzy total waiting time (veh*s):    {total_wait_fuzzy:.1f}")
+    print(f"Standard total waiting time (veh*s): {total_wait_standard:.1f}")
+    if total_wait_fuzzy < total_wait_standard:
+        print("Winner: Fuzzy controller (lower total waiting time).")
+    elif total_wait_fuzzy > total_wait_standard:
+        print("Winner: Standard controller (lower total waiting time).")
     else:
-        print("[Init] Using baseline params (skip GA for fast startup).")
-        params = BASELINE_PARAMS
-
-    plot_membership_functions(params)
-    fuzzy_system = build_fuzzy_control_system(params)
-
-    print(f"[Init] Controller ready. GA optimized={use_ga_optimization}")
-    sumo_binary = "sumo-gui" if use_gui else "sumo"
-    print(f"[Init] Launching {sumo_binary}...")
-    traci.start([sumo_binary, "-c", "config.sumocfg", "--start", "true", "--quit-on-end", "true"])
-    print(f"[Init] {sumo_binary} started. You can now control/observe the simulation.")
-
-    next_green_duration = 20.0
-    last_phase = -1
-    decision_made = False
-
-    while traci.simulation.getMinExpectedNumber() > 0:
-        traci.simulationStep()
-        current_phase = traci.trafficlight.getPhase(TLS_ID)
-        now = traci.simulation.getTime()
-        time_left = traci.trafficlight.getNextSwitch(TLS_ID) - now
-
-        if current_phase != last_phase:
-            decision_made = False
-            if current_phase in (PHASE_EW_GREEN, PHASE_NS_GREEN):
-                traci.trafficlight.setPhaseDuration(TLS_ID, next_green_duration)
-                dir_name = "EW" if current_phase == PHASE_EW_GREEN else "NS"
-                print(f"[{now:.1f}s] {dir_name} GREEN start -> {next_green_duration:.1f}s")
-            last_phase = current_phase
-
-        if not decision_made and current_phase in (PHASE_EW_GREEN, PHASE_NS_GREEN) and time_left <= DECISION_HORIZON_SEC:
-            detector_ids, next_direction = _get_opposite_detector_ids(current_phase)
-            queue, wait_time, occupancy = _get_metrics(detector_ids)
-
-            next_green_duration = evaluate_green_time(fuzzy_system, queue, wait_time, occupancy)
-            next_green_duration = float(np.clip(next_green_duration, MIN_GREEN, MAX_GREEN))
-
-            print(
-                f"[{now:.1f}s] {next_direction} demand | queue={queue:.0f}, wait={wait_time:.1f}s, "
-                f"occupancy={occupancy:.1f}% -> next_green={next_green_duration:.1f}s"
-            )
-            decision_made = True
-
-    traci.close()
-    print("\nSimulation finished successfully.")
+        print("Result: Tie.")
 
 
 if __name__ == "__main__":
-    run(use_ga_optimization=False, use_gui=True)
+    run_parallel_comparison()
